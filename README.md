@@ -11,6 +11,8 @@ the luton Telnet session.
 
 For examnple, #OUTPUT,5,1,100.00 will set deviceID 5 to ON
 
+Reference: http://www.lutron.com/TechnicalDocumentLibrary/040249.pdf
+
 Created this as a hack to allow for IFTTT connectivity.  Use the Particle
 connector on IFTTT / DO Button / etc. and you can control any LUTRON device
 
