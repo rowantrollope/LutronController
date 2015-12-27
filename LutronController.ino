@@ -46,24 +46,10 @@ void setup()
     // shield so I can control a few lights.
     b.begin();
 
-    Particle.function("lutronSendCommand", lutronSendCommand);
-    Particle.function("lutronSetDimmer", lutronSetDimmer);
-    Particle.function("lutronGetDimmer", lutronGetDimmer);
-
-    Particle.variable("lightID1", nLightID[0]);
-    Particle.variable("lightID2", nLightID[1]);
-    Particle.variable("lightID3", nLightID[2]);
-    Particle.variable("lightID4", nLightID[3]);
-
-    Particle.variable("lightLevel1", fLightLevel[0]);
-    Particle.variable("lightLevel2", fLightLevel[1]);
-    Particle.variable("lightLevel3", fLightLevel[2]);
-    Particle.variable("lightLevel4", fLightLevel[3]);
-
-    Particle.variable("overrideCmd1", sOverrideCmd[0]);
-    Particle.variable("overrideCmd2", sOverrideCmd[1]);
-    Particle.variable("overrideCmd3", sOverrideCmd[2]);
-    Particle.variable("overrideCmd4", sOverrideCmd[3]);
+    Particle.function("sendCmd", lutronSendCommand);
+    Particle.function("setDimmer", lutronSetDimmer);
+    Particle.function("getDimmer", lutronGetDimmer);
+    Particle.function("setSwitch", setSwitch);
 
     // Make sure your Serial Terminal app is closed before powering your device
     Serial.begin(9600);
@@ -344,4 +330,21 @@ int lutronSendCommand(String sCommand)
     client.println(sCommand);
 
     return 1;
+}
+
+// NN,MM
+// NN = 1-4 (Button ID)
+// MM = Device ID
+
+int setSwitch(String sCommand)
+{
+    int nPos = sCommand.indexOf(',');
+
+    if(nPos == -1)
+        return -1;
+
+    int nButtonID = sCommand.substring(0,nPos).toInt();
+    int nDeviceID = sCommand.substring(nPos+1).toInt();
+    nLightID[nButtonID] = nDeviceID;
+
 }
