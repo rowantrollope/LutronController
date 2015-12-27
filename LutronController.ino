@@ -29,13 +29,16 @@ byte lutronIP[] = { 10, 0, 0, 201 }; // My RadioRA2 server
 char myIpString[24];
 TCPClient client;
 InternetButton b = InternetButton();
-int nLightID[4] = { 0, 71, 0, 72 }; // When InternetButton N is pressed, this Light ID will get a command sent
+int nLightID[4] = { 34, 71, 47, 72 }; // When InternetButton N is pressed, this Light ID will get a command sent
 float fLightLevel[4]; // The current LEVEL for that dimmer
 float fOnLightLevel[4] = { 90, 90, 90, 90 }; // The level when the light is set to ON
 
 String sDimmerReadTemplate = "?OUTPUT,%i,1"; // variable is device id
 String sDimmerWriteTemplate = "#OUTPUT,%i,1,%.2f"; // first variable is the device id, second is dimmer level
 String sOverrideCmd[4];
+int nDimFactor=3;
+Thread *ledBreatherThread;
+Thread *telnetListenerThread;
 
 void setup()
 {
@@ -53,42 +56,75 @@ void setup()
     Particle.variable("lightID4", nLightID[3]);
 
     Particle.variable("lightLevel1", fLightLevel[0]);
-    Particle.variable("lightLevel1", fLightLevel[1]);
-    Particle.variable("lightLevel1", fLightLevel[2]);
-    Particle.variable("lightLevel1", fLightLevel[3]);
+    Particle.variable("lightLevel2", fLightLevel[1]);
+    Particle.variable("lightLevel3", fLightLevel[2]);
+    Particle.variable("lightLevel4", fLightLevel[3]);
 
-    Particle.variable("overrideCmd", sOverrideCmd[0]);
-    Particle.variable("overrideCmd", sOverrideCmd[1]);
-    Particle.variable("overrideCmd", sOverrideCmd[2]);
-    Particle.variable("overrideCmd", sOverrideCmd[3]);
-
-    String sOverrideCmd[4];
+    Particle.variable("overrideCmd1", sOverrideCmd[0]);
+    Particle.variable("overrideCmd2", sOverrideCmd[1]);
+    Particle.variable("overrideCmd3", sOverrideCmd[2]);
+    Particle.variable("overrideCmd4", sOverrideCmd[3]);
 
     // Make sure your Serial Terminal app is closed before powering your device
     Serial.begin(9600);
 
-    lutronConnect();
-    lutonInitDimmerLevels();
-
+    // initialize LEDs
+    ledBreatherThread = new Thread("ledBreather", ledBreather, NULL);
     b.allLedsOff();
-    for(int i=0;i<4;i++)
+
+    // Connect to Lutron server
+    lutronConnect();
+    delay(2000);
+
+    // Setup listener thread to respond to light change events
+    telnetListenerThread = new Thread("telnetListener", telnetListener, NULL);
+
+    // Get the current states of the lights we care about
+    lutronInitDimmerLevels();
+
+}
+
+void setLEDState(int nID, float nLightLevel)
+{
+    if(nLightLevel == 0)
     {
-        // set the LED level to the dimness level of the light
-        int nLevel = 255 * (fLightLevel[i] / 100);
-        if(nLevel/3<=0)
-            b.ledOff(i*3);
-        else
-            b.ledOn(i*3, nLevel/3, nLevel/3, nLevel/3);
-        //_lutronSetDimmer(nLightID[i], fOnLightLevel[i]);
+        String sDebug = String::format("setLEDState() - LED %n OFF", nID);
+        Serial.println(sDebug);
+        b.ledOff(nID*3);
+        return;
     }
 
+    // set the LED level to the dimness level of the light
+    float multiplier = nLightLevel / 100;
+
+    int nLevel = 255 * multiplier;
+
+    //nLevel = nLevel / nDimFactor;
+
+    String sDebug = String::format("setLEDState() - LED: %i - LEVEL: %i", nID, nLevel);
+    Serial.println(sDebug);
+
+    softLEDOn(nID*3,nLevel, nLevel, nLevel);
+
+    //b.ledOn(nID*3, nLevel, nLevel, nLevel);
+
+}
+
+void softLEDOn(int nID, int nRed, int nGreen, int nBlue)
+{
+    int nSteps = 10;
+    for(float i=0;i<1;i+=.1)
+    {
+        b.ledOn(nID, nRed*i, nGreen*i, nBlue*i);
+        delay(25);
+    }
 }
 
 void loop()
 {
     // Check if any buttons are depressed, turn on the LED then send the
     // command to Lutron bridge
-
+    bool bButtonPressed=false;
     // TODO: Support dimming- When off, click turns to on level, click and hold gradually raises light
 
     // TODO: Maintain state: Listen for feedback on telnet, watching for any of our lights, then setting state internally
@@ -97,62 +133,170 @@ void loop()
     {
         if(b.buttonOn(i+1))
         {
-            Serial.println("Button Pressed.");
+            Serial.println("loop() - Button Pressed.");
             if( fLightLevel[i] > 0) // If light is ON, turn it off
             {
+                b.playSong("g2,2");
                 _lutronSetDimmer(nLightID[i], 0);
 
-                b.ledOff(i*3);
-
                 fLightLevel[i] = 0;
+
             }
             else // Set to ON
             {
+                b.playSong("c5,4");
                 _lutronSetDimmer(nLightID[i], fOnLightLevel[i]);
 
+                fLightLevel[i] = fOnLightLevel[i];
+
+                /* NOW Handled by listener
+                b.ledOff(i*3);
                 // set the LED level to the dimness level of the light
+
                 int nLevel = 255 * (fOnLightLevel[i] / 100);
-                if(nLevel / 3 >= 0)
-                    b.ledOn(i*3, nLevel/3, nLevel/3, nLevel/3);
+                if(nLevel / nDimFactor >= 0)
+                    b.ledOn(i*3, nLevel/nDimFactor, nLevel/nDimFactor, nLevel/nDimFactor);
                 else
                     b.ledOff(i*3);
+                */
 
-                fLightLevel[i] = fOnLightLevel[i];
             }
+            delay(500);
+            return;
         }
     }
-    delay(500);
 }
 
+os_thread_return_t ledBreather(void* param)
+{
+    Serial.println("ledBreather() - Thread Started!");
+    while(true)
+    {
+        for(int i=0;i<150;i++)
+        {
+            b.ledOn(1,0,i,0);
+            delay(10);
+        }
+        for(int i=150;i>0;i--)
+        {
+            b.ledOn(1,0,i,0);
+            delay(10);
+        }
+    }
+}
+
+// this thread watches for the specific events we care about -
+// dimmers changing levels, and stores the new level
+os_thread_return_t telnetListener(void* param)
+{
+    // Extract the current level and save it - format ~OUTPUT,DEVICEID,LEVEL (FLOAT)
+    String sVal = "~OUTPUT,";
+
+    while(true)
+    {
+        String sResult;
+        bool    bInput=false;
+        while (client.available())
+        {
+            char c = client.read();
+            //Serial.print(c);
+            sResult += c;
+            bInput=true;
+        }
+
+        if(bInput)
+        {
+            Serial.println("telnetListener() - " + sResult);
+
+            // HANDLE INPUT
+            int nStart=0;
+            do
+            {
+                // LOOK For ~OUTPUT,NN,NN,NN
+                nStart = sResult.indexOf(sVal, nStart);
+
+                if(nStart == -1)
+                    break;
+
+                // FOUND ~OUTPUT
+                // Serial.println(String::format("telnetListener() - FOUND ~OUTPUT Command", nStart));
+
+                // first TOKEN is device ID
+                nStart += sVal.length();
+
+                int nEnd = sResult.indexOf(',', nStart);
+                String sDevice = sResult.substring(nStart, nEnd);
+                int nDevice = sDevice.toInt();
+
+                // next TOKEN is the command, 1, advance past it
+                nStart = nEnd + 1;
+                nEnd = sResult.indexOf(',', nStart);
+
+                String sCommand = sResult.substring(nStart, nEnd);
+                int nCommand = sCommand.toInt();
+
+                // next TOKEN is the level
+                nStart = nEnd + 1;
+                nEnd = sResult.indexOf('\r\n', nStart);
+
+                String sLevel = sResult.substring(nStart, nEnd);
+                float fLevel = sLevel.toFloat();
+
+                if(nCommand == 1)
+                {
+                    String sDebug = String::format("telnetListener() - DEVICE=%i, CMD=%i, LEVEL=%.2f", nDevice, nCommand, fLevel);
+                    Serial.println(sDebug);
+
+                    // Check if we care about this light
+                    for(int i=0;i<4;i++)
+                        if(nLightID[i] == nDevice)
+                        {
+                            fLightLevel[i] = fLevel;
+                            setLEDState(i, fLightLevel[i]);
+                        }
+
+                    nStart = sResult.indexOf(sVal, nStart);
+                }
+
+            } while (nStart != -1);
+        }
+    }
+}
 int lutronConnect()
 {
-    Serial.println("Connecting...");
+    Serial.println("lutronConnect - Connecting...");
 
     if (client.connect(lutronIP, 23))
     {
-        Serial.println("Connected");
+        Serial.println("lutronConnect - Connected");
 
         client.println("lutron");
         client.println("integration");
 
+        /* Now handled by listenerThread
+
+        delay(2000);
         while (client.available()) {
             char c = client.read();
             Serial.print(c);
         }
-        Serial.println("Ready.");
+        */
         return 1;
     }
     else
     {
-        Serial.println("Connection failed.");
+        Serial.println("lutronConnect - Connection failed.");
         return 0;
     }
 }
 
-int lutonInitDimmerLevels()
+int lutronInitDimmerLevels()
 {
     for(int i=0;i<4;i++)
-        fLightLevel[i] = _lutronGetDimmer(nLightID[i]);
+    {
+        _lutronGetDimmer(nLightID[i]);
+        delay(250);
+    }
 
     return 1;
 }
@@ -160,7 +304,7 @@ int lutonInitDimmerLevels()
 // Internet Published Function ... REQUIRES FORMAT: NN,MM where NN == DeviceID, MM == DimLevel 0-100
 int lutronSetDimmer(String sDimmer)
 {
-    Serial.println("Received Command: " + sDimmer);
+    Serial.println("lutronSetDimmer - Received Command: " + sDimmer);
 
     int nPos = sDimmer.indexOf(',');
 
@@ -170,82 +314,34 @@ int lutronSetDimmer(String sDimmer)
     int nDimmerID = sDimmer.substring(0,nPos).toInt();
     float fLevel = sDimmer.substring(nPos+1).toFloat();
 
-    if(_lutronSetDimmer(nDimmerID, fLevel).length())
-        return 1;
-    else
-        return -1;
+    return _lutronSetDimmer(nDimmerID, fLevel);
 }
 
-String _lutronSetDimmer(int nDimmer, float fLevel)
+int _lutronSetDimmer(int nDimmer, float fLevel)
 {
     String sCommand = String::format(sDimmerWriteTemplate, nDimmer, fLevel);
-    return(_lutronSendCommand(sCommand));
+    return lutronSendCommand(sCommand);
 }
 
 // Get level of dimmer, sDimmer is the Device ID (number), returns the dim level (0-100)
 int lutronGetDimmer(String sDimmer)
 {
-    return (int) _lutronGetDimmer(sDimmer.toInt());
+    return _lutronGetDimmer(sDimmer.toInt());
 }
-
-// Internal Function ...
-float _lutronGetDimmer(int nLightID)
+int _lutronGetDimmer(int nDimmer)
 {
-    String sCommand = String::format(sDimmerReadTemplate, nLightID);
+    String sCommand = String::format(sDimmerReadTemplate, nDimmer);
 
     // Ask lutron the dimmer level
-    String sReturn = _lutronSendCommand(sCommand);
-
-    // Extract the current level and save it - format ~OUTPUT,DEVICEID,LEVEL (FLOAT)
-    int nPos = sReturn.lastIndexOf(',');
-    if(nPos == -1)
-    {
-        Serial.println("Error gettng dim level: " + sReturn + " Expected ~OUTPUT,ID,LEVEL");
-        return 0; // So we don't cause problems, we'll just return 0...
-    }
-
-    String sLevel = sReturn.substring(nPos + 1);
-    if(sLevel.length() > 0)
-    {
-        Serial.println("Lutron returned: " + sReturn);
-        //Serial.println("Dimmer: " + nLightID + ", Level: " + sLevel);
-        return sLevel.toFloat();
-    }
-    else
-    {
-        Serial.println("_lutronGetDimmer ERROR");
-        return -1;
-    }
-
+    return lutronSendCommand(sCommand);
 }
-
 // Internet Published function
 int lutronSendCommand(String sCommand)
 {
-    _lutronSendCommand(sCommand);
-    return 1;
-}
-
-// Internal function which returns the feedback
-String _lutronSendCommand(String sCommand)
-{
-    Serial.println("Recieved Command: " + sCommand);
+    Serial.println("lutronSendCommand - " + sCommand);
 
     // send command to lutron
     client.println(sCommand);
 
-    String sResult;
-    // give a bit of time to respond
-    delay(500);
-    while (client.available())
-    {
-        char c = client.read();
-        Serial.print(c);
-        sResult += c;
-    }
-
-    Serial.print("_lutronSendCommand - returned: ");
-    Serial.println(sResult);
-
-    return sResult;
+    return 1;
 }
