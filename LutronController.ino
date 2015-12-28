@@ -227,23 +227,27 @@ os_thread_return_t ledBreather(void* param)
     Serial.println("ledBreather() - Thread Started!");
     while(true)
     {
-        for(int i=0;i<150;i++)
+        //for(int n=1;n<11;n++)
         {
-            if(bConnected)
-                b.ledOn(1,0,i,0);
-            else
-                b.ledOn(1,i,0,0);
+            int n=1;
+            for(int i=0;i<50;i++)
+            {
+                if(bConnected)
+                    b.ledOn(n,0,i,0);
+                else
+                    b.ledOn(n,i,0,0);
 
-            delay(10);
-        }
-        for(int i=150;i>0;i--)
-        {
-            if(bConnected)
-                b.ledOn(1,0,i,0);
-            else
-                b.ledOn(1,i,0,0);
+                delay(10);
+            }
+            for(int i=50;i>0;i--)
+            {
+                if(bConnected)
+                    b.ledOn(n,0,i,0);
+                else
+                    b.ledOn(n,i,0,0);
 
-            delay(10);
+                delay(10);
+            }
         }
     }
 }
