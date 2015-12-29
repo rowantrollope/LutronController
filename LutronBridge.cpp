@@ -75,11 +75,11 @@ os_thread_return_t LutronBridge::telnetListener(void* param)
     {
         String sResult;
         bool bInput=false;
-        while (client.available())
+        while (client.available()) 
         {
             char c = client.read();
             sResult += c;
-            bInput=true;
+            bInput = true;
         }
 
         if(bInput)

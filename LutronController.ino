@@ -229,24 +229,35 @@ os_thread_return_t ledBreather(void* param)
     {
         //for(int n=1;n<11;n++)
         {
-            int n=1;
+            //int n=1;
             for(int i=0;i<50;i++)
             {
                 if(bConnected)
-                    b.ledOn(n,0,i,0);
+                {
+                    b.ledOn(1,0,i,0);
+                    b.ledOn(11,0,i,0);
+                }
                 else
-                    b.ledOn(n,i,0,0);
+                {
+                    b.ledOn(1,i,0,0);
+                    b.ledOn(11,i,0,0);
+                }
 
-                delay(10);
+                delay(50);
             }
             for(int i=50;i>0;i--)
             {
                 if(bConnected)
-                    b.ledOn(n,0,i,0);
+                {
+                    b.ledOn(1,0,i,0);
+                    b.ledOn(11,0,i,0);
+                }
                 else
-                    b.ledOn(n,i,0,0);
-
-                delay(10);
+                {
+                    b.ledOn(1,i,0,0);
+                    b.ledOn(11,i,0,0);
+                }
+                delay(50);
             }
         }
     }
