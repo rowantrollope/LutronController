@@ -152,9 +152,13 @@ void loop()
 
 void dimmerChanged(int nID)
 {
-    Serial.println("dimmerChanged()");
+    int nLevel = lutron.getDevice(nID).currentLevel;
 
-    setLEDState(nID, lutron.getDevice(nID).currentLevel, true);
+    String sEventData = String::format("DEVICE=%i,LEVEL=%i", nID, nLevel);
+    //Particle.publish("lutron/device/changed", sEventData);
+    Serial.println(sEventData);
+
+    setLEDState(nID, nLevel, true);
 }
 
 void handleButtonPress(int nButtonID)
@@ -196,10 +200,10 @@ void setLEDState(int nDeviceID, float nLightLevel, bool bSoft)
         return;
     }
 
-    // set the LED level to the dimness level of the light
-    float multiplier = nLightLevel / 100;
-
-    int nLevel = 255 * multiplier;
+    // Map intensity of light (0-100) to intensity of LED (0-255)
+    int nFactor = nLightLevel / 100;
+    //int nLevel = map(nLightLevel, 0, 100, 0, 255);
+    int nLevel = nLightLevel * 255;
 
     String sDebug = String::format("setLEDState() - LED: %i - LEVEL: %i", nLED, nLevel);
     Serial.println(sDebug);
@@ -207,7 +211,7 @@ void setLEDState(int nDeviceID, float nLightLevel, bool bSoft)
     if(bSoft)
         softLEDOn(nLED,nLevel, nLevel, nLevel);
     else
-        b.ledOn(nLED,nLevel,nLevel,nLevel);
+        b.ledOn(nLED, nLevel, nLevel, nLevel);
 
 }
 

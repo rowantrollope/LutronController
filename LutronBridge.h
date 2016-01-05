@@ -56,6 +56,7 @@ private:
     DEVICE_MAP deviceMap;
     notifyFunc changeCB;
     TCPClient client;
+    bool    bPublishAll;
 };
 
 //----------------

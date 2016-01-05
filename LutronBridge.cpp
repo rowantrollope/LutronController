@@ -30,6 +30,7 @@
 LutronBridge::LutronBridge()
 {
     changeCB = NULL;
+    bPublishAll = true;
 }
 
 os_thread_return_t listener(void* param)
@@ -75,7 +76,7 @@ os_thread_return_t LutronBridge::telnetListener(void* param)
     {
         String sResult;
         bool bInput=false;
-        while (client.available()) 
+        while (client.available())
         {
             char c = client.read();
             sResult += c;
@@ -123,6 +124,12 @@ os_thread_return_t LutronBridge::telnetListener(void* param)
                     String sDebug = String::format("LutronBridge::telnetListener() - DEVICE=%i, CMD=%i, LEVEL=%.2f", nDevice, nCommand, fLevel);
                     Serial.println(sDebug);
 
+                    // Publish light changed events
+                    if(bPublishAll)
+                    {
+                        String sEventData = String::format("DEVICE=%i,COMMAND=%i,LEVEL=%i", nDevice, nCommand, fLevel);
+                        Particle.publish("lutron/device/changed", sEventData);
+                    }
                     // Check if we care about this light
                     DEVICE_MAP::iterator it = deviceMap.find(nDevice);
                     if(it != deviceMap.end())
