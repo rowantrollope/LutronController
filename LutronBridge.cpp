@@ -31,6 +31,7 @@ LutronBridge::LutronBridge()
 {
     changeCB = NULL;
     bPublishAll = true;
+    telnetListenerThread = NULL;
 }
 
 os_thread_return_t listener(void* param)
@@ -41,8 +42,9 @@ os_thread_return_t listener(void* param)
 bool LutronBridge::connect(byte lutronIP[])
 {
     Serial.println("lutronConnect - Connecting...");
+    client.connect(lutronIP, TELNET_PORT);
 
-    if (client.connect(lutronIP, TELNET_PORT))
+    if (client.connected())
     {
         Serial.println("lutronConnect - Connected");
 
@@ -50,23 +52,38 @@ bool LutronBridge::connect(byte lutronIP[])
         client.println("integration");
 
         // wait a couple seconds for the telnet server to catch up
-        delay(2000);
+        delay(1000);
 
         // Setup listener thread to respond to light change events
         telnetListenerThread = new Thread("telnetListener", listener, this);
 
+        delay(1000);
+
         // Get the current states of the lights we care about
-        initDimmerLevels();
+        // the enums all device ID's from 0 to 90.
+        initDimmerLevels(90);
 
         return true;
     }
     else
     {
-        Serial.println("lutronConnect - Connection failed.");
+        Serial.println("lutronConnect - Connection failed");
+        client.stop();
+        delay(1000);
         return false;
     }
 }
+void LutronBridge::disconnect()
+{
+    client.stop();
 
+    if(telnetListenerThread)
+    {
+        delete telnetListenerThread;
+        telnetListenerThread = NULL;
+    }
+    return;
+}
 os_thread_return_t LutronBridge::telnetListener(void* param)
 {
     // Extract the current level and save it - format ~OUTPUT,DEVICEID,LEVEL (FLOAT)
@@ -76,6 +93,7 @@ os_thread_return_t LutronBridge::telnetListener(void* param)
     {
         String sResult;
         bool bInput=false;
+        Serial.println("LutronBridge::telnetListened - Waiting for server...");
         while (client.available())
         {
             char c = client.read();
@@ -83,9 +101,9 @@ os_thread_return_t LutronBridge::telnetListener(void* param)
             bInput = true;
         }
 
-        if(bInput)
+        if(bInput) // Work to do?
         {
-            Serial.println("LutronBridge::telnetListener() - " + sResult);
+            Serial.println("LutronBridge::telnetListened - RECEIVED: " + sResult);
 
             // HANDLE INPUT
             int nStart=0;
@@ -95,7 +113,11 @@ os_thread_return_t LutronBridge::telnetListener(void* param)
                 nStart = sResult.indexOf(sVal, nStart);
 
                 if(nStart == -1)
+                {
+                    Serial.println("LutronBridge::telnetListener() - IGNORING - " + sResult);
                     break;
+                }
+                //Serial.println("LutronBridge::telnetListener() - FOUND OUTPUT - " + sResult);
 
                 // FOUND ~OUTPUT
                 // first TOKEN is device ID
@@ -119,6 +141,7 @@ os_thread_return_t LutronBridge::telnetListener(void* param)
                 String sLevel = sResult.substring(nStart, nEnd);
                 float fLevel = sLevel.toFloat();
 
+                // only command we care about for lights is "OUTPUT CHANGED"
                 if(nCommand == 1)
                 {
                     String sDebug = String::format("LutronBridge::telnetListener() - DEVICE=%i, CMD=%i, LEVEL=%.2f", nDevice, nCommand, fLevel);
@@ -127,28 +150,36 @@ os_thread_return_t LutronBridge::telnetListener(void* param)
                     // Publish light changed events
                     if(bPublishAll)
                     {
-                        String sEventData = String::format("DEVICE=%i,COMMAND=%i,LEVEL=%i", nDevice, nCommand, fLevel);
+                        String sEventData = String::format("device=%i&level=%.0f", nDevice, nCommand, fLevel);
                         Particle.publish("lutron/device/changed", sEventData);
                     }
-                    // Check if we care about this light
-                    DEVICE_MAP::iterator it = deviceMap.find(nDevice);
-                    if(it != deviceMap.end())
-                    {
-                        it->second.currentLevel = fLevel;
-                        if(changeCB)
-                            changeCB(nDevice);
-                    }
+                    // we now STORE all light events in our map...
+                    LUTRON_DEVICE device = { nDevice, fLevel, 0 };
+
+                    deviceMap[nDevice] = device;
+
+                    if(changeCB)
+                        changeCB(nDevice);
 
                     nStart = sResult.indexOf(sVal, nStart);
                 }
 
             } while (nStart != -1);
         }
+        // throttle read as we seem to be overwhelming something here
+        delay(250);
     }
 }
 
-int LutronBridge::initDimmerLevels()
+// this function requests the level for every deviceID between 0 and nMax,
+// the telnetListener will catch the response and initialize the object
+// in our object map
+// This is less than ideal, and really we should only call getDimmer for the devices
+// we know exist, but there doesn't seem to be a way to request the list of
+// valid devices...
+int LutronBridge::initDimmerLevels(int nMax)
 {
+    /*
     for(DEVICE_MAP::iterator it = deviceMap.begin();
         it != deviceMap.end();
         it++)
@@ -156,11 +187,13 @@ int LutronBridge::initDimmerLevels()
         _getDimmer(it->first);
         delay(250);
     }
-     /* TODO kill
-    _getDimmer(devices[0].id);
-    delay(250);
-    _getDimmer(devices[1].id);
-*/
+    */
+
+    for (int i=0;i<nMax;i++)
+    {
+        _getDimmer(i);
+        delay(50);
+    }
     return 1;
 }
 void LutronBridge::addDevice(int nDeviceID, LUTRON_DEVICE device)
@@ -174,6 +207,10 @@ void LutronBridge::updateDevice(int nDeviceID, LUTRON_DEVICE device)
 LUTRON_DEVICE LutronBridge::getDevice(int nDeviceID)
 {
     return deviceMap[nDeviceID];
+}
+bool LutronBridge::deviceExists(int nDeviceID)
+{
+    return deviceMap.find(nDeviceID) != deviceMap.end();
 }
 
 // Internet Published Function ... REQUIRES FORMAT: NN,MM where NN == DeviceID, MM == DimLevel 0-100
@@ -210,13 +247,85 @@ int LutronBridge::_getDimmer(int nDimmer)
     // Ask lutron the dimmer level
     return sendCommand(sCommand);
 }
+
+// returns a string with all dimmer states
+String LutronBridge::getAllDimmers()
+{
+    String states;
+
+    for(DEVICE_MAP::iterator it = deviceMap.begin();
+        it != deviceMap.end();
+        it++)
+    {
+        states += String::format("D=%i&L=%.0f\r\n", it->first, it->second.currentLevel);
+    }
+
+    Particle.publish("lutron/alldevices/state", states);
+    Serial.println("LutronBridge::getAllDimmers()");
+    Serial.println(states);
+
+    return states;
+}
+
+int LutronBridge::setAllDimmers(String sCommand)
+{
+    String  sDeviceToken="D=";
+    String  sLevelToken="L=";
+    String  sResult = sCommand;
+
+    // HANDLE INPUT
+    int nStart=0;
+    int nEnd=0;
+    do
+    {
+        // LOOK For D= (NN&L=NN)
+        nStart = sResult.indexOf(sDeviceToken, nStart);
+
+        if(nStart == -1)
+            break;
+
+        // FOUND D=
+        // first TOKEN is device ID
+        nStart += sDeviceToken.length();
+
+        nEnd = sResult.indexOf('&', nStart);
+        String sDevice = sResult.substring(nStart, nEnd);
+        int nDevice = sDevice.toInt();
+
+        // LOOK for L=
+        nStart = sResult.indexOf(sLevelToken, nStart);
+
+        if(nStart == -1)
+            break;
+
+        nStart += sLevelToken.length();
+        nEnd = sResult.indexOf('\r\n', nStart);
+
+        String sLevel = sResult.substring(nStart, nEnd);
+        float fLevel = sLevel.toFloat();
+
+        nStart = nEnd + 2;
+
+        _setDimmer(nDevice, fLevel);
+
+    } while (nStart != -1);
+
+    return 1;
+}
 // Internet Published function
 int LutronBridge::sendCommand(String sCommand)
 {
-    Serial.println("LutronBridge::sendCommand - " + sCommand);
-
     // send command to lutron
-    client.println(sCommand);
-
-    return 1;
+    if(client.connected())
+    {
+        Serial.println("LutronBridge::sendCommand STARTED - " + sCommand);
+        client.println(sCommand);
+        Serial.println("LutronBridge::sendCommand RETURNED");
+        return 1;
+    }
+    else
+    {
+        Serial.println("LutronBridge::sendCommand - CLIENT DISCONNECTED");
+        return -1;
+    }
 }

@@ -32,22 +32,27 @@ public:
     LutronBridge();
 
     bool connect(byte lutronIP[]);
-
+    void disconnect();
+    
     os_thread_return_t telnetListener(void* param);
 
     int
-        initDimmerLevels(),
+        initDimmerLevels(int nMax),
         setDimmer(String sDimmer),
         _setDimmer(int nDimmer, float fLevel),
         getDimmer(String sDimmer),
         _getDimmer(int nDimmer),
-        sendCommand(String sCommand);
+        sendCommand(String sCommand),
+        setAllDimmers(String sCommand);
+
+    String getAllDimmers();
 
     void setNotifyCallback(notifyFunc func) { changeCB = func; };
 
     void addDevice(int nDeviceID, LUTRON_DEVICE device);
     LUTRON_DEVICE getDevice(int nDeviceID);
     void updateDevice(int nDeviceID, LUTRON_DEVICE device);
+    bool deviceExists(int nDeviceID);
 
 private:
 

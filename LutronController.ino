@@ -18,16 +18,34 @@ InternetButton b = InternetButton();
 
 Thread *ledBreatherThread;
 String sLastStatus;
+String sDimmerStates;
+
 int nLastPress=0;
+
+// Disconnect reconnect to Telnet every once in a while, currently every
 bool bConnected=false;
 
-struct BUTTON_MAP {
-    int nButtonID;
-    int nLED;
-};
+// This is the code for a periodic reconnect - as I've seen inconsistencies when
+// we stay connected for too long
 
-std::map<int,BUTTON_MAP>   mapDevice;
-std::map<int,int>          mapButtons;
+bool bReconnect=false;
+/*
+Timer   reconnectTimer(20 * 60 * 1000, reconnectTelnet);
+
+void reconnectTelnet() {
+    bReconnect=true;
+}
+*/
+typedef struct
+{
+    int buttonID;
+    int ledID;
+    int deviceID;
+} BUTTON_DATA;
+
+BUTTON_DATA  button1 = { 2, 3, 71 };
+BUTTON_DATA  button2 = { 4, 9, 72 };
+
 void setup()
 {
     // For my Lutron Bridge I'm doubling up and using a Photon in an InternetButton
@@ -37,37 +55,40 @@ void setup()
     Particle.function("sendCmd", sendCommand);
     Particle.function("setDimmer", setDimmer);
     Particle.function("getDimmer", getDimmer);
-
+    Particle.function("getAll", getAllDimmers);
+    Particle.function("setAll", setAllDimmers);
     Particle.function("setButton1", setBtn1);
     Particle.function("setButton2", setBtn2);
-
+    Particle.function("reconnect", reconnectLutron);
     Particle.variable("lastStatus", sLastStatus);
-    // map our devices to our buttons/LEDs
-    mapDevice[71].nButtonID = 2;
-    mapDevice[71].nLED = 3;
-    mapDevice[72].nButtonID = 4;
-    mapDevice[72].nLED = 9;
-    mapButtons[2] = 71;
-    mapButtons[4] = 72;
+    Particle.variable("dimmerStates", sDimmerStates);
 
     // Make sure your Serial Terminal app is closed before powering your device
     Serial.begin(9600);
 
     // initialize LEDs
     ledBreatherThread = new Thread("ledBreather", ledBreather, NULL);
+
     b.allLedsOff();
-
-    // Connect to Lutron server
-    LUTRON_DEVICE   device;
-    device.onLevel = 90;
-
-    lutron.addDevice(71, device);
-    lutron.addDevice(72, device);
 
     lutron.setNotifyCallback(dimmerChanged);
 
     bConnected = lutron.connect(lutronIP);
 
+}
+// debug: testing reconnect
+int reconnectLutron(String sCommand)
+{
+    bReconnect = true;
+}
+int getAllDimmers(String sCommand)
+{
+    sDimmerStates = lutron.getAllDimmers();
+    return 1;
+}
+int setAllDimmers(String sCommand)
+{
+    return lutron.setAllDimmers(sCommand);
 }
 int sendCommand(String sCommand)
 {
@@ -87,6 +108,11 @@ void loop()
     {
         bConnected = lutron.connect(lutronIP);
         delay(3000);
+    }
+    if(bReconnect)
+    {
+        lutron.disconnect();
+        bConnected = bReconnect = false;
     }
 
     // Check if any buttons are depressed, turn on the LED then send the
@@ -109,7 +135,7 @@ void loop()
     }
     else if(b.buttonOn(1)) // RAISE
     {
-        LUTRON_DEVICE device = lutron.getDevice(mapButtons[nLastPress]);
+        LUTRON_DEVICE device = lutron.getDevice(getDeviceIDFromButton(nLastPress));
 
         if(device.currentLevel == 100)
             return;
@@ -124,12 +150,12 @@ void loop()
         if (device.currentLevel > 100)
             device.currentLevel = 100;
 
-        lutron._setDimmer(mapButtons[nLastPress], device.currentLevel);
+        lutron._setDimmer(getDeviceIDFromButton(nLastPress), device.currentLevel);
 
     }
     else if (b.buttonOn(3)) // LOWER
     {
-        LUTRON_DEVICE device = lutron.getDevice(mapButtons[nLastPress]);
+        LUTRON_DEVICE device = lutron.getDevice(getDeviceIDFromButton(nLastPress));
 
         if(device.currentLevel == 0)
             return;
@@ -144,28 +170,59 @@ void loop()
         if(device.currentLevel < 0)
             device.currentLevel = 0;
 
-        lutron._setDimmer(mapButtons[nLastPress], device.currentLevel);
+        lutron._setDimmer(getDeviceIDFromButton(nLastPress), device.currentLevel);
 
     }
 
 }
 
-void dimmerChanged(int nID)
+void dimmerChanged(int nDeviceID)
 {
-    int nLevel = lutron.getDevice(nID).currentLevel;
+    // Check if we care about this light
+    // LutronBridge will inform us of ALL light events
+    if(nDeviceID == button1.deviceID || nDeviceID == button2.deviceID)
+    {
+        int nLevel = lutron.getDevice(nDeviceID).currentLevel;
 
-    String sEventData = String::format("DEVICE=%i,LEVEL=%i", nID, nLevel);
-    //Particle.publish("lutron/device/changed", sEventData);
-    Serial.println(sEventData);
+        String sEventData = String::format("dimmerChanged() - DEVICE=%i,LEVEL=%i", nDeviceID, nLevel);
+        //Particle.publish("lutron/device/changed", sEventData);
+        Serial.println(sEventData);
 
-    setLEDState(nID, nLevel, true);
+        setLEDState(getButtonIDFromDevice(nDeviceID), nLevel, true);
+    }
+    else
+    {
+        //String str = String::format("dimmerChanged() - IGNORING DEVICE: %i", nDeviceID);
+        //Serial.println(str);
+        return;
+    }
+
+}
+int getDeviceIDFromButton(int button)
+{
+    if(button1.buttonID == button)
+        return button1.deviceID;
+    else if(button2.buttonID == button)
+        return button2.deviceID;
+    else
+        return -1;
+}
+int getButtonIDFromDevice(int device)
+{
+    if(button1.deviceID == device)
+        return button1.buttonID;
+    else if(button2.deviceID == device)
+        return button2.buttonID;
+    else
+        return -1;
 }
 
 void handleButtonPress(int nButtonID)
 {
     Serial.println("loop() - Button Pressed.");
 
-    int             deviceID = mapButtons[nButtonID];
+    int deviceID = getDeviceIDFromButton(nButtonID);
+
     LUTRON_DEVICE   device = lutron.getDevice(deviceID);
 
     String sDebug = String::format("handleButtonPress() - DeviceID: %i, device.currentLevel: %i", deviceID, device.currentLevel);
@@ -173,7 +230,6 @@ void handleButtonPress(int nButtonID)
 
     if(device.currentLevel > 0) // If light is ON, turn it off
     {
-
         b.playSong("c7,8");
         lutron._setDimmer(deviceID, 0);
         device.currentLevel = 0;
@@ -188,9 +244,16 @@ void handleButtonPress(int nButtonID)
     }
 }
 
-void setLEDState(int nDeviceID, float nLightLevel, bool bSoft)
+void setLEDState(int nButtonID, float nLightLevel, bool bSoft)
 {
-    int nLED = mapDevice[nDeviceID].nLED;
+    int nLED = 0;
+
+    if(button1.buttonID == nButtonID)
+        nLED = button1.ledID;
+    else if(button2.buttonID == nButtonID)
+        nLED = button2.ledID;
+    else
+        return;
 
     if(nLightLevel == 0)
     {
@@ -234,7 +297,7 @@ os_thread_return_t ledBreather(void* param)
         //for(int n=1;n<11;n++)
         {
             //int n=1;
-            for(int i=0;i<50;i++)
+            for(int i=0;i<35;i++)
             {
                 if(bConnected)
                 {
@@ -247,9 +310,9 @@ os_thread_return_t ledBreather(void* param)
                     b.ledOn(11,i,0,0);
                 }
 
-                delay(50);
+                delay(25);
             }
-            for(int i=50;i>0;i--)
+            for(int i=35;i>0;i--)
             {
                 if(bConnected)
                 {
@@ -261,35 +324,17 @@ os_thread_return_t ledBreather(void* param)
                     b.ledOn(1,i,0,0);
                     b.ledOn(11,i,0,0);
                 }
-                delay(50);
+                delay(25);
             }
         }
     }
 }
 
-// NN,MM
-// NN = 1-4 (Button ID)
-// MM = Device ID
-
 int setBtn1(String sCommand)
 {
-    int deviceID = sCommand.toInt();
-
-    LUTRON_DEVICE dev;
-    dev.onLevel = 90;
-    lutron.addDevice(deviceID, dev);
-    mapButtons[2] = deviceID;
-    mapDevice[deviceID].nButtonID = 2;
-    return lutron._getDimmer(deviceID);
+    return button1.deviceID = sCommand.toInt();
 }
 int setBtn2(String sCommand)
 {
-    int deviceID = sCommand.toInt();
-
-    LUTRON_DEVICE dev;
-    dev.onLevel = 90;
-    lutron.addDevice(deviceID, dev);
-    mapButtons[4] = deviceID;
-    mapDevice[deviceID].nButtonID = 4;
-    return lutron._getDimmer(deviceID);
+    return button2.deviceID = sCommand.toInt();;
 }
