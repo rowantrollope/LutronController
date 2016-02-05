@@ -73,6 +73,9 @@ void setup()
 
     lutron.setNotifyCallback(dimmerChanged);
 
+    // set this flag to initialize all light states
+    lutron.m_bMonitor = true;
+
     bConnected = lutron.connect(lutronIP);
 
 }
@@ -182,13 +185,13 @@ void dimmerChanged(int nDeviceID)
     // LutronBridge will inform us of ALL light events
     if(nDeviceID == button1.deviceID || nDeviceID == button2.deviceID)
     {
-        int nLevel = lutron.getDevice(nDeviceID).currentLevel;
+        float fLevel = lutron.getDevice(nDeviceID).currentLevel;
 
-        String sEventData = String::format("dimmerChanged() - DEVICE=%i,LEVEL=%i", nDeviceID, nLevel);
+        String sEventData = String::format("dimmerChanged() - DEVICE=%i,LEVEL=%.02f", nDeviceID, fLevel);
         //Particle.publish("lutron/device/changed", sEventData);
         Serial.println(sEventData);
 
-        setLEDState(getButtonIDFromDevice(nDeviceID), nLevel, true);
+        setLEDState(getButtonIDFromDevice(nDeviceID), fLevel, true);
     }
     else
     {
@@ -225,7 +228,7 @@ void handleButtonPress(int nButtonID)
 
     LUTRON_DEVICE   device = lutron.getDevice(deviceID);
 
-    String sDebug = String::format("handleButtonPress() - DeviceID: %i, device.currentLevel: %i", deviceID, device.currentLevel);
+    String sDebug = String::format("handleButtonPress() - DeviceID: %i, device.currentLevel: %.02f", deviceID, device.currentLevel);
     Serial.println(sDebug);
 
     if(device.currentLevel > 0) // If light is ON, turn it off
@@ -263,18 +266,13 @@ void setLEDState(int nButtonID, float nLightLevel, bool bSoft)
         return;
     }
 
-    // Map intensity of light (0-100) to intensity of LED (0-255)
-    int nFactor = nLightLevel / 100;
-    //int nLevel = map(nLightLevel, 0, 100, 0, 255);
-    int nLevel = nLightLevel * 255;
-
-    String sDebug = String::format("setLEDState() - LED: %i - LEVEL: %i", nLED, nLevel);
+    String sDebug = String::format("setLEDState() - LED: %i - LEVEL: %.02f", nLED, nLightLevel);
     Serial.println(sDebug);
 
     if(bSoft)
-        softLEDOn(nLED,nLevel, nLevel, nLevel);
+        softLEDOn(nLED,nLightLevel, nLightLevel, nLightLevel);
     else
-        b.ledOn(nLED, nLevel, nLevel, nLevel);
+        b.ledOn(nLED, nLightLevel, nLightLevel, nLightLevel);
 
 }
 
@@ -284,7 +282,7 @@ void softLEDOn(int nID, int nRed, int nGreen, int nBlue)
     for(float i=0;i<1;i+=.1)
     {
         b.ledOn(nID, nRed*i, nGreen*i, nBlue*i);
-        delay(25);
+        delay(50);
     }
 }
 

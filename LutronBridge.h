@@ -15,12 +15,17 @@ using namespace std;
 #ifndef LutronBridge_h
 #define LutronBridge_h
 
-struct LUTRON_DEVICE
+#define DEFAULT_ON_LEVEL  90
+
+class LUTRON_DEVICE
 {
+public:
+    LUTRON_DEVICE(int nID=0, float fCurLevel=0, float fOnLevel=DEFAULT_ON_LEVEL);
     int id;
     float currentLevel;
     float onLevel;
 };
+
 
 typedef void (*notifyFunc)(int id);
 typedef std::map<int, LUTRON_DEVICE> DEVICE_MAP;
@@ -33,7 +38,7 @@ public:
 
     bool connect(byte lutronIP[]);
     void disconnect();
-    
+
     os_thread_return_t telnetListener(void* param);
 
     int
@@ -53,7 +58,7 @@ public:
     LUTRON_DEVICE getDevice(int nDeviceID);
     void updateDevice(int nDeviceID, LUTRON_DEVICE device);
     bool deviceExists(int nDeviceID);
-
+    bool m_bMonitor;
 private:
 
     Thread *telnetListenerThread;
